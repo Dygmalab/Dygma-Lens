@@ -7,7 +7,7 @@ export default defineConfig({
   },
   build: {
     rollupOptions: {
-      external: ["electron", "node-hid", "chokidar", "glob", "serialport"],
+      external: ["electron", "node-hid", "chokidar", "glob"],
     },
   },
 });

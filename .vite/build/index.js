@@ -41,6 +41,7 @@ const PACKET_TYPE_LAYER = 2;
 const OVERLAY_EVENT_TAP = 1;
 const OVERLAY_EVENT_HOLD = 2;
 const OVERLAY_EVENT_DOUBLE_TAP = 3;
+const SONSEI_RAW_HID_REPORT_ID = 5;
 function parseKeymap(raw, keysPerLayer2) {
   const nums = raw.trim().split(/\s+/).map(Number);
   const layers = [];
@@ -211,11 +212,13 @@ class ConfigWatcher extends events.EventEmitter {
     return this.currentConfig;
   }
 }
+const RECONNECT_INTERVAL_MS = 2e3;
 class RawHidListener extends events.EventEmitter {
   constructor() {
     super(...arguments);
     __publicField(this, "device", null);
     __publicField(this, "running", false);
+    __publicField(this, "reconnectTimer", null);
   }
   async start() {
     try {
@@ -225,8 +228,18 @@ class RawHidListener extends events.EventEmitter {
         (d) => d.vendorId === SONSEI_VENDOR_ID && d.productId === SONSEI_PRODUCT_ID && d.usagePage === 65280 && d.usage === 1
       );
       if (!target || !target.path) {
+        console.log(
+          "[HID] Device not found (VID=0x%s PID=0x%s usagePage=0xff00 usage=0x01)",
+          SONSEI_VENDOR_ID.toString(16),
+          SONSEI_PRODUCT_ID.toString(16)
+        );
+        console.log("[HID] Available devices:", devices.map((d) => {
+          var _a, _b;
+          return `VID=${(_a = d.vendorId) == null ? void 0 : _a.toString(16)} PID=${(_b = d.productId) == null ? void 0 : _b.toString(16)} usage=${d.usagePage}/${d.usage}`;
+        }));
         return;
       }
+      console.log(`[HID] Device opened: ${target.path}`);
       this.device = new HID.HID(target.path);
       this.running = true;
       this.emit("connected");
@@ -235,109 +248,56 @@ class RawHidListener extends events.EventEmitter {
         this.device = null;
         this.running = false;
         this.emit("disconnected");
+        console.log("[HID] Device disconnected, scheduling reconnect...");
+        this.scheduleReconnect();
       });
-    } catch {
+    } catch (err) {
+      console.log("[HID] start() error:", err);
     }
   }
+  scheduleReconnect() {
+    if (this.reconnectTimer) return;
+    this.reconnectTimer = setTimeout(async () => {
+      this.reconnectTimer = null;
+      console.log("[HID] Attempting reconnect...");
+      await this.start();
+      if (!this.running) this.scheduleReconnect();
+    }, RECONNECT_INTERVAL_MS);
+  }
   onData(buf) {
-    if (buf.length < OVERLAY_PACKET_SIZE) return;
-    if (buf[0] !== OVERLAY_MAGIC_BYTE) return;
-    const packetType = buf[1];
+    var _a, _b;
+    console.log(`[HID] raw packet (${buf.length}b): ${buf.slice(0, 8).toString("hex")}`);
+    if (buf.length < OVERLAY_PACKET_SIZE) {
+      console.log(`[HID] packet too short: ${buf.length} < ${OVERLAY_PACKET_SIZE}`);
+      return;
+    }
+    const base = buf[0] === SONSEI_RAW_HID_REPORT_ID ? 1 : 0;
+    console.log(`[HID] base=${base} buf[base]=0x${(_a = buf[base]) == null ? void 0 : _a.toString(16)} magic=0x${OVERLAY_MAGIC_BYTE.toString(16)}`);
+    if (buf[base] !== OVERLAY_MAGIC_BYTE) {
+      console.log("[HID] magic byte mismatch, skipping");
+      return;
+    }
+    const packetType = buf[base + 1];
+    console.log(`[HID] packetType=0x${packetType == null ? void 0 : packetType.toString(16)} payload=0x${(_b = buf[base + 2]) == null ? void 0 : _b.toString(16)}`);
     if (packetType === PACKET_TYPE_OVERLAY) {
-      this.emit("overlay", { type: "overlay", eventType: buf[2] });
+      this.emit("overlay", { type: "overlay", eventType: buf[base + 2] });
     } else if (packetType === PACKET_TYPE_LAYER) {
-      this.emit("layer-change", { type: "layer", layer: buf[2] });
+      console.log(`[HID] emitting layer-change: layer=${buf[base + 2]}`);
+      this.emit("layer-change", { type: "layer", layer: buf[base + 2] });
     }
   }
   stop() {
     var _a;
     this.running = false;
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
     try {
       (_a = this.device) == null ? void 0 : _a.close();
     } catch {
     }
     this.device = null;
-  }
-}
-class SerialListener extends events.EventEmitter {
-  constructor() {
-    super(...arguments);
-    __publicField(this, "port", null);
-    __publicField(this, "lineBuf", "");
-  }
-  async start() {
-    try {
-      const { SerialPort } = await import("serialport");
-      const ports = await SerialPort.list();
-      const vidHex = SONSEI_VENDOR_ID.toString(16).padStart(4, "0");
-      const target = ports.find(
-        (p) => {
-          var _a;
-          return ((_a = p.vendorId) == null ? void 0 : _a.toLowerCase()) === vidHex;
-        }
-      );
-      if (!target) {
-        console.log("[SerialListener] Sonsei not found on any serial port");
-        return;
-      }
-      console.log("[SerialListener] connecting to", target.path);
-      this.port = new SerialPort({
-        path: target.path,
-        baudRate: 115200,
-        autoOpen: false
-      });
-      this.port.on("data", (chunk) => {
-        this.lineBuf += chunk.toString();
-        let nl = this.lineBuf.indexOf("\n");
-        while (nl >= 0) {
-          const line = this.lineBuf.slice(0, nl).replace(/\r$/, "");
-          this.lineBuf = this.lineBuf.slice(nl + 1);
-          this.handleLine(line);
-          nl = this.lineBuf.indexOf("\n");
-        }
-      });
-      this.port.on("close", () => {
-        console.log("[SerialListener] disconnected");
-        this.port = null;
-        this.lineBuf = "";
-        this.emit("disconnected");
-      });
-      this.port.on("error", (err) => {
-        var _a;
-        console.log("[SerialListener] error:", err.message);
-        try {
-          (_a = this.port) == null ? void 0 : _a.close();
-        } catch {
-        }
-        this.port = null;
-        this.lineBuf = "";
-        this.emit("disconnected");
-      });
-      await new Promise((resolve, reject) => {
-        this.port.open((err) => err ? reject(err) : resolve());
-      });
-      console.log("[SerialListener] connected to", target.path);
-      this.emit("connected");
-    } catch (err) {
-      console.log("[SerialListener] not available:", err.message);
-    }
-  }
-  handleLine(line) {
-    if (!line.startsWith("overlay_layer:")) return;
-    const layer = Number.parseInt(line.slice("overlay_layer:".length), 10);
-    if (!Number.isNaN(layer)) {
-      console.log("[SerialListener] layer-change:", layer);
-      this.emit("layer-change", { type: "layer", layer });
-    }
-  }
-  stop() {
-    var _a;
-    try {
-      (_a = this.port) == null ? void 0 : _a.close();
-    } catch {
-    }
-    this.port = null;
-    this.lineBuf = "";
   }
 }
 const STORE_PATH = path.join(os.homedir(), ".lens", "settings.json");
@@ -394,13 +354,13 @@ class SettingsStore {
   }
 }
 let win = null;
+let overlayVisible = false;
 let overlayActive = false;
 let currentModel = null;
 let activeLayer = 0;
 const store = new SettingsStore();
 const configWatcher = new ConfigWatcher();
 const hidListener = new RawHidListener();
-const serialListener = new SerialListener();
 function createWindow() {
   const settings = store.get();
   const { width, height } = electron.screen.getPrimaryDisplay().workAreaSize;
@@ -461,20 +421,16 @@ function applyOverlayMode(enabled) {
     win.webContents.executeJavaScript(`document.body.classList.remove('overlay')`);
   }
 }
-function showOverlay() {
-  if (!win) return;
-  const settings = store.get();
-  if (settings.overlayMode) applyOverlayMode(true);
-  win.show();
-}
 function toggleOverlay() {
   if (!win) return;
   if (overlayActive) {
     overlayActive = false;
+    overlayVisible = false;
     applyOverlayMode(false);
     win.hide();
   } else {
     overlayActive = true;
+    overlayVisible = true;
     applyOverlayMode(true);
     win.show();
   }
@@ -482,10 +438,6 @@ function toggleOverlay() {
 function onLayerChange(layer) {
   activeLayer = layer;
   pushActiveLayer(layer);
-  const settings = store.get();
-  if (settings.overlayAutoShow && settings.overlayMode) {
-    showOverlay();
-  }
 }
 function registerIpcHandlers() {
   electron.ipcMain.handle("lens:get-state", () => ({
@@ -534,20 +486,39 @@ electron.app.whenReady().then(async () => {
     pushModel(model);
     pushActiveLayer(activeLayer);
   });
-  hidListener.on("layer-change", ({ layer }) => onLayerChange(layer));
-  serialListener.on("layer-change", ({ layer }) => onLayerChange(layer));
+  hidListener.on("layer-change", ({ layer }) => {
+    console.log(`[HID] layer-change received: layer=${layer}`);
+    onLayerChange(layer);
+  });
   hidListener.on("overlay", ({ eventType }) => {
-    if (eventType === OVERLAY_EVENT_TAP || eventType === OVERLAY_EVENT_DOUBLE_TAP) {
-      toggleOverlay();
+    if (eventType === OVERLAY_EVENT_TAP) {
+      if (overlayActive && !overlayVisible) {
+        overlayVisible = true;
+        win == null ? void 0 : win.show();
+      }
     } else if (eventType === OVERLAY_EVENT_HOLD) {
-      showOverlay();
+      if (overlayActive) {
+        overlayVisible = false;
+        win == null ? void 0 : win.hide();
+      }
+    } else if (eventType === OVERLAY_EVENT_DOUBLE_TAP) {
+      if (overlayActive) {
+        overlayActive = false;
+        overlayVisible = true;
+        applyOverlayMode(false);
+        win == null ? void 0 : win.show();
+      } else {
+        overlayActive = true;
+        overlayVisible = true;
+        applyOverlayMode(true);
+        win == null ? void 0 : win.show();
+      }
     }
   });
   electron.globalShortcut.register("CommandOrControl+Alt+L", () => toggleOverlay());
   await configWatcher.start();
   await hidListener.start().catch(() => {
   });
-  await serialListener.start();
   electron.app.on("activate", () => {
     if (!win) win = createWindow();
     else win.show();

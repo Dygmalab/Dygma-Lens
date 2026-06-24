@@ -3,9 +3,8 @@ import path from "path";
 import type { KeyboardModel, LensSettings, LensState } from "../shared/types";
 import { ConfigWatcher } from "./config-watcher";
 import { RawHidListener } from "./raw-hid-listener";
-import { SerialListener } from "./serial-listener";
 import { SettingsStore } from "./settings-store";
-import { OVERLAY_EVENT_TAP, OVERLAY_EVENT_HOLD, OVERLAY_EVENT_DOUBLE_TAP } from "../shared/constants";
+import { OVERLAY_EVENT_TAP, OVERLAY_EVENT_HOLD, OVERLAY_EVENT_RELEASE, OVERLAY_EVENT_DOUBLE_TAP } from "../shared/constants";
 
 declare const MAIN_WINDOW_VITE_DEV_SERVER_URL: string;
 declare const MAIN_WINDOW_VITE_NAME: string;
@@ -19,7 +18,6 @@ let activeLayer = 0;
 const store = new SettingsStore();
 const configWatcher = new ConfigWatcher();
 const hidListener = new RawHidListener();
-const serialListener = new SerialListener();
 
 function createWindow(): BrowserWindow {
   const settings = store.get();
@@ -125,10 +123,6 @@ function toggleOverlay(): void {
 function onLayerChange(layer: number): void {
   activeLayer = layer;
   pushActiveLayer(layer);
-  const settings = store.get();
-  if (settings.overlayAutoShow && settings.overlayMode) {
-    showOverlay();
-  }
 }
 
 function registerIpcHandlers(): void {
@@ -190,14 +184,37 @@ app.whenReady().then(async () => {
     pushActiveLayer(activeLayer);
   });
 
-  hidListener.on("layer-change", ({ layer }) => onLayerChange(layer));
-  serialListener.on("layer-change", ({ layer }) => onLayerChange(layer));
+  hidListener.on("layer-change", ({ layer }) => {
+    console.log(`[HID] layer-change received: layer=${layer}`);
+    onLayerChange(layer);
+  });
 
   hidListener.on("overlay", ({ eventType }) => {
-    if (eventType === OVERLAY_EVENT_TAP || eventType === OVERLAY_EVENT_DOUBLE_TAP) {
-      toggleOverlay();
+    if (eventType === OVERLAY_EVENT_TAP) {
+      // Re-show the overlay window only if already in overlay mode and currently hidden
+      if (overlayActive && !overlayVisible) {
+        overlayVisible = true;
+        win?.show();
+      }
     } else if (eventType === OVERLAY_EVENT_HOLD) {
-      showOverlay();
+      // Hide window only when in overlay mode
+      if (overlayActive) {
+        overlayVisible = false;
+        win?.hide();
+      }
+    } else if (eventType === OVERLAY_EVENT_DOUBLE_TAP) {
+      // Toggle overlay mode; exiting overlay shows the window in normal mode
+      if (overlayActive) {
+        overlayActive = false;
+        overlayVisible = true;
+        applyOverlayMode(false);
+        win?.show();
+      } else {
+        overlayActive = true;
+        overlayVisible = true;
+        applyOverlayMode(true);
+        win?.show();
+      }
     }
   });
 
@@ -205,7 +222,6 @@ app.whenReady().then(async () => {
 
   await configWatcher.start();
   await hidListener.start().catch(() => { /* HID not available, skip */ });
-  await serialListener.start();
 
   app.on("activate", () => {
     if (!win) win = createWindow();
