@@ -32,8 +32,8 @@ contextBridge.exposeInMainWorld("lens", {
     return ipcRenderer.invoke("lens:set-opacity", v);
   },
 
-  setAlwaysOnTop(v: boolean): Promise<LensSettings> {
-    return ipcRenderer.invoke("lens:set-always-on-top", v);
+  setHoverMode(v: boolean): Promise<LensSettings> {
+    return ipcRenderer.invoke("lens:set-hover-mode", v);
   },
 
   setShowUnderglow(v: boolean): Promise<LensSettings> {
@@ -59,4 +59,6 @@ contextBridge.exposeInMainWorld("lens", {
   winMinimize(): void { ipcRenderer.send("win:minimize"); },
   winMaximize(): void { ipcRenderer.send("win:maximize"); },
   winClose(): void { ipcRenderer.send("win:close"); },
+  winResize(dir: string, dx: number, dy: number): void { ipcRenderer.send("win:resize", dir, dx, dy); },
+  winMove(x: number, y: number): void { ipcRenderer.send("win:move", x, y); },
 });

@@ -27,16 +27,16 @@ const THUMB_PATHS: Record<number, string> = {
   59: "M57.426 4a4 4 0 00-4-4H4.224A4 4 0 00.23 4.218l2.39 43.81a4 4 0 003.994 3.782h46.812a4 4 0 004-4V4z",
 };
 
-// Approximate visual center [x, y] in local path coordinates for each thumb key
-const THUMB_TEXT_CENTER: Record<number, [number, number]> = {
-  48: [28, 25],   // sonsei-t1:  rect ~57×52
-  49: [28, 22],   // defy-t2:    tapered ~62×58
-  50: [32, 30],   // defy-t3:    arc ~73×70
-  51: [26, 32],   // defy-t4:    fan ~75×82
-  56: [48, 32],   // defy-tR4:   fan ~75×82 (mirrored)
-  57: [38, 30],   // defy-tR3:   arc ~72×70 (mirrored)
-  58: [33, 22],   // defy-tR2:   tapered ~62×58 (mirrored)
-  59: [28, 24],   // sonsei-tR1: rect ~57×52
+// Approximate visual center [x, y] and rotation (degrees) for each thumb key label
+const THUMB_TEXT: Record<number, [number, number, number]> = {
+  48: [28, 25,   0],  // sonsei-t1:  rect, horizontal
+  49: [28, 22, -12],  // defy-t2:    tapered, slight angle
+  50: [32, 30, -24],  // defy-t3:    arc
+  51: [26, 32, -38],  // defy-t4:    fan, most angled
+  56: [48, 32,  38],  // defy-tR4:   fan mirrored
+  57: [38, 30,  24],  // defy-tR3:   arc mirrored
+  58: [33, 22,  12],  // defy-tR2:   tapered mirrored
+  59: [28, 24,   0],  // sonsei-tR1: rect, horizontal
 };
 
 function lum(r: number, g: number, b: number) { return 0.299 * r + 0.587 * g + 0.114 * b; }
@@ -73,13 +73,14 @@ export const KeyboardView: React.FC<Props> = ({ model, activeLayer, layout, laye
     const fgColor = fg(color.r, color.g, color.b);
 
     if (thumbPath) {
-      const [tx, ty] = THUMB_TEXT_CENTER[key.index] ?? [28, 24];
+      const [tx, ty, tr] = THUMB_TEXT[key.index] ?? [28, 24, 0];
       return (
         <g key={`k-${key.index}`} transform={`translate(${key.x},${key.y})`}>
           <path d={thumbPath} fill="#303949" />
           <path d={thumbPath} fill={color.css} />
           {label.primary && (
             <text x={tx} y={ty} textAnchor="middle" dominantBaseline="middle"
+              transform={tr !== 0 ? `rotate(${tr},${tx},${ty})` : undefined}
               fontSize={FS} fontWeight="700" fontFamily="system-ui,-apple-system,sans-serif"
               fill={fgColor} pointerEvents="none">{label.primary}</text>
           )}

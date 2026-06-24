@@ -25,8 +25,8 @@ electron.contextBridge.exposeInMainWorld("lens", {
   setOpacity(v) {
     return electron.ipcRenderer.invoke("lens:set-opacity", v);
   },
-  setAlwaysOnTop(v) {
-    return electron.ipcRenderer.invoke("lens:set-always-on-top", v);
+  setHoverMode(v) {
+    return electron.ipcRenderer.invoke("lens:set-hover-mode", v);
   },
   setShowUnderglow(v) {
     return electron.ipcRenderer.invoke("lens:set-show-underglow", v);
@@ -51,5 +51,11 @@ electron.contextBridge.exposeInMainWorld("lens", {
   },
   winClose() {
     electron.ipcRenderer.send("win:close");
+  },
+  winResize(dir, dx, dy) {
+    electron.ipcRenderer.send("win:resize", dir, dx, dy);
+  },
+  winMove(x, y) {
+    electron.ipcRenderer.send("win:move", x, y);
   }
 });

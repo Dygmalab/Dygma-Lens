@@ -9,7 +9,7 @@ declare global {
       getState(): Promise<LensState>;
       getSettings(): Promise<LensSettings>;
       setOpacity(v: number): Promise<LensSettings>;
-      setAlwaysOnTop(v: boolean): Promise<LensSettings>;
+      setHoverMode(v: boolean): Promise<LensSettings>;
       setShowUnderglow(v: boolean): Promise<LensSettings>;
       setLayout(v: string): Promise<LensSettings>;
       setLayerName(layer: number, name: string): Promise<LensSettings>;
@@ -18,6 +18,8 @@ declare global {
       winMinimize(): void;
       winMaximize(): void;
       winClose(): void;
+      winResize(dir: string, dx: number, dy: number): void;
+      winMove(x: number, y: number): void;
     };
   }
 }

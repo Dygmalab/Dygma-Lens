@@ -5,6 +5,43 @@ import { LAYOUTS } from "./layouts";
 
 const LAYERS_MAX = 10;
 
+const RESIZE_DIRS = ["n", "s", "e", "w", "nw", "ne", "sw", "se"] as const;
+type ResizeDir = (typeof RESIZE_DIRS)[number];
+
+function ResizeFrame() {
+  function startResize(dir: ResizeDir) {
+    return (e: React.MouseEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      document.body.classList.add("resizing");
+      let lastX = e.clientX;
+      let lastY = e.clientY;
+      const onMove = (ev: MouseEvent) => {
+        const dx = ev.clientX - lastX;
+        const dy = ev.clientY - lastY;
+        lastX = ev.clientX;
+        lastY = ev.clientY;
+        window.lens?.winResize(dir, dx, dy);
+      };
+      const onUp = () => {
+        document.body.classList.remove("resizing");
+        window.removeEventListener("mousemove", onMove);
+        window.removeEventListener("mouseup", onUp);
+      };
+      window.addEventListener("mousemove", onMove);
+      window.addEventListener("mouseup", onUp);
+    };
+  }
+  return (
+    <div className="resize-frame">
+      <div className="resize-border" />
+      {RESIZE_DIRS.map((dir) => (
+        <div key={dir} className={`resize-handle resize-${dir}`} onMouseDown={startResize(dir)} />
+      ))}
+    </div>
+  );
+}
+
 export function App() {
   const [model, setModel] = useState<KeyboardModel | null>(null);
   const [activeLayer, setActiveLayer] = useState(0);
@@ -12,6 +49,8 @@ export function App() {
   const [configFound, setConfigFound] = useState(false);
   const [layerPickerOpen, setLayerPickerOpen] = useState(false);
   const [opacityOpen, setOpacityOpen] = useState(false);
+  const isDragging = useRef(false);
+  const appRef = useRef<HTMLDivElement>(null);
   const pickerRef = useRef<HTMLDivElement>(null);
   const opacityRef = useRef<HTMLDivElement>(null);
 
@@ -75,8 +114,44 @@ export function App() {
     return layerNames[i] || `Layer ${i}`;
   }
 
+  function setHovered(v: boolean) {
+    if (v) appRef.current?.classList.add("hovered");
+    else appRef.current?.classList.remove("hovered");
+  }
+
+  function handleBoardMouseDown(e: React.MouseEvent<HTMLDivElement>) {
+    if (!settings?.hoverMode || e.button !== 0) return;
+    e.preventDefault();
+    isDragging.current = true;
+    const startCursorX = e.screenX;
+    const startCursorY = e.screenY;
+    const startWinX = window.screenX;
+    const startWinY = window.screenY;
+    const onMove = (ev: MouseEvent) => {
+      window.lens?.winMove(
+        startWinX + (ev.screenX - startCursorX),
+        startWinY + (ev.screenY - startCursorY),
+      );
+    };
+    const onUp = () => {
+      isDragging.current = false;
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+    };
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+  }
+
   return (
-    <div className="app">
+    <div
+      ref={appRef}
+      className="app"
+      onMouseEnter={() => settings?.hoverMode && setHovered(true)}
+      onMouseLeave={() => {
+        if (!isDragging.current && !document.body.classList.contains("resizing"))
+          setHovered(false);
+      }}
+    >
       <div className="toolbar">
         <div className="toolbar-left">
           <div ref={pickerRef} style={{ position: "relative" }}>
@@ -151,20 +226,20 @@ export function App() {
               </svg>
             </button>
             <button
-              className={`icon-button${settings.alwaysOnTop ? " active" : ""}`}
-              title="Always on top"
+              className={`icon-button${settings.hoverMode ? " active" : ""}`}
+              title="Hover mode (drag & resize in overlay)"
               onClick={() => {
                 if (!window.lens) return;
-                window.lens.setAlwaysOnTop(!settings.alwaysOnTop).then((s: LensSettings) => setSettings(s));
+                window.lens.setHoverMode(!settings.hoverMode).then((s: LensSettings) => setSettings(s));
               }}
             >
               <svg width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
-                <path d="M12 2l3 7h6l-5 4 2 7-6-4-6 4 2-7-5-4h6z" />
+                <path d="M12 2v4M12 18v4M2 12h4M18 12h4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83" />
               </svg>
             </button>
             <button
               className="icon-button"
-              title="Opacity"
+              title="Overlay opacity"
               onClick={() => setOpacityOpen((v) => !v)}
             >
               <svg width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
@@ -175,7 +250,7 @@ export function App() {
             {opacityOpen && (
               <div className="popover opacity-popover">
                 <div className="popover-title">
-                  <h2>Opacity</h2>
+                  <h2>Overlay Opacity</h2>
                   <span>{Math.round(settings.opacity * 100)}%</span>
                 </div>
                 <input
@@ -211,7 +286,7 @@ export function App() {
         </div>
       </div>
 
-      <div className={`board${settings.overlayMode ? " dimmed" : ""}`}>
+      <div className={`board${settings.overlayMode ? " dimmed" : ""}`} onMouseDown={handleBoardMouseDown}>
         <KeyboardView
           model={model}
           activeLayer={activeLayer}
@@ -219,6 +294,7 @@ export function App() {
           layerNames={settings.layerNames}
         />
       </div>
+      <ResizeFrame />
     </div>
   );
 }

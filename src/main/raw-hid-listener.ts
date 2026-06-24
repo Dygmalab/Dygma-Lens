@@ -28,10 +28,19 @@ type RawHidEvents = {
 
 const RECONNECT_INTERVAL_MS = 2000;
 
+const DEBOUNCE_MS: Record<number, number> = {
+  0x00: 80,   // RELEASE
+  0x01: 150,  // TAP
+  0x02: 150,  // HOLD
+  0x03: 400,  // DOUBLE_TAP
+};
+const DEFAULT_DEBOUNCE_MS = 150;
+
 export class RawHidListener extends EventEmitter<RawHidEvents> {
   private device: import("node-hid").HID | null = null;
   private running = false;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  private lastOverlayEventTime: Record<number, number> = {};
 
   async start(): Promise<void> {
     try {
@@ -98,7 +107,16 @@ export class RawHidListener extends EventEmitter<RawHidEvents> {
     console.log(`[HID] packetType=0x${packetType?.toString(16)} payload=0x${buf[base + 2]?.toString(16)}`);
 
     if (packetType === PACKET_TYPE_OVERLAY) {
-      this.emit("overlay", { type: "overlay", eventType: buf[base + 2] });
+      const eventType = buf[base + 2];
+      const now = Date.now();
+      const debounce = DEBOUNCE_MS[eventType] ?? DEFAULT_DEBOUNCE_MS;
+      const last = this.lastOverlayEventTime[eventType] ?? 0;
+      if (now - last < debounce) {
+        console.log(`[HID] overlay eventType=0x${eventType.toString(16)} debounced (${now - last}ms < ${debounce}ms)`);
+        return;
+      }
+      this.lastOverlayEventTime[eventType] = now;
+      this.emit("overlay", { type: "overlay", eventType });
     } else if (packetType === PACKET_TYPE_LAYER) {
       console.log(`[HID] emitting layer-change: layer=${buf[base + 2]}`);
       this.emit("layer-change", { type: "layer", layer: buf[base + 2] });

@@ -292,3 +292,77 @@ body.overlay .layer-label {
 .keyboard-view {
   background: transparent;
 }
+
+/* ── Hover mode (overlay + hover-mode body classes) ─────────────────── */
+body.overlay.hover-mode .board {
+  cursor: grab;
+}
+body.overlay.hover-mode .board:active {
+  cursor: grabbing;
+}
+
+/* Keys: slightly dimmed by default, fade in on hover */
+body.overlay.hover-mode .keyboard-view {
+  opacity: 0.55;
+  filter: none;
+  transition: opacity 0.3s ease, filter 0.3s ease;
+}
+body.overlay.hover-mode .app.hovered .keyboard-view {
+  opacity: 1;
+  filter: drop-shadow(0 0 10px rgba(35, 136, 255, 0.4));
+}
+
+/* Resize frame container — hidden until hovered */
+.resize-frame {
+  display: none;
+}
+body.overlay.hover-mode .resize-frame {
+  display: block;
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 100;
+  opacity: 0;
+  transition: opacity 0.25s ease;
+}
+body.overlay.hover-mode .app.hovered .resize-frame {
+  opacity: 1;
+}
+
+/* Border inside resize frame */
+.resize-border {
+  position: absolute;
+  inset: 2px;
+  border: 1.5px solid rgba(35, 136, 255, 0.3);
+  border-radius: 4px;
+  pointer-events: none;
+}
+
+/* Freeze all hover transitions while resizing */
+body.resizing .keyboard-view,
+body.resizing .resize-frame {
+  transition: none !important;
+}
+body.overlay.hover-mode.resizing .keyboard-view {
+  opacity: 1;
+  filter: drop-shadow(0 0 10px rgba(35, 136, 255, 0.4));
+}
+body.overlay.hover-mode.resizing .resize-frame {
+  opacity: 1;
+}
+
+/* Individual resize handles */
+.resize-handle {
+  position: absolute;
+  pointer-events: all;
+  -webkit-app-region: no-drag;
+  background: transparent;
+}
+.resize-n  { top: 0;    left: 10px;  right: 10px; height: 6px; cursor: n-resize;  }
+.resize-s  { bottom: 0; left: 10px;  right: 10px; height: 6px; cursor: s-resize;  }
+.resize-e  { right: 0;  top: 10px; bottom: 10px;  width:  6px; cursor: e-resize;  }
+.resize-w  { left: 0;   top: 10px; bottom: 10px;  width:  6px; cursor: w-resize;  }
+.resize-nw { top: 0;    left: 0;   width: 14px; height: 14px;  cursor: nw-resize; }
+.resize-ne { top: 0;    right: 0;  width: 14px; height: 14px;  cursor: ne-resize; }
+.resize-sw { bottom: 0; left: 0;   width: 14px; height: 14px;  cursor: sw-resize; }
+.resize-se { bottom: 0; right: 0;  width: 14px; height: 14px;  cursor: se-resize; }

@@ -213,12 +213,24 @@ class ConfigWatcher extends events.EventEmitter {
   }
 }
 const RECONNECT_INTERVAL_MS = 2e3;
+const DEBOUNCE_MS = {
+  0: 80,
+  // RELEASE
+  1: 150,
+  // TAP
+  2: 150,
+  // HOLD
+  3: 400
+  // DOUBLE_TAP
+};
+const DEFAULT_DEBOUNCE_MS = 150;
 class RawHidListener extends events.EventEmitter {
   constructor() {
     super(...arguments);
     __publicField(this, "device", null);
     __publicField(this, "running", false);
     __publicField(this, "reconnectTimer", null);
+    __publicField(this, "lastOverlayEventTime", {});
   }
   async start() {
     try {
@@ -280,7 +292,16 @@ class RawHidListener extends events.EventEmitter {
     const packetType = buf[base + 1];
     console.log(`[HID] packetType=0x${packetType == null ? void 0 : packetType.toString(16)} payload=0x${(_b = buf[base + 2]) == null ? void 0 : _b.toString(16)}`);
     if (packetType === PACKET_TYPE_OVERLAY) {
-      this.emit("overlay", { type: "overlay", eventType: buf[base + 2] });
+      const eventType = buf[base + 2];
+      const now = Date.now();
+      const debounce = DEBOUNCE_MS[eventType] ?? DEFAULT_DEBOUNCE_MS;
+      const last = this.lastOverlayEventTime[eventType] ?? 0;
+      if (now - last < debounce) {
+        console.log(`[HID] overlay eventType=0x${eventType.toString(16)} debounced (${now - last}ms < ${debounce}ms)`);
+        return;
+      }
+      this.lastOverlayEventTime[eventType] = now;
+      this.emit("overlay", { type: "overlay", eventType });
     } else if (packetType === PACKET_TYPE_LAYER) {
       console.log(`[HID] emitting layer-change: layer=${buf[base + 2]}`);
       this.emit("layer-change", { type: "layer", layer: buf[base + 2] });
@@ -302,13 +323,13 @@ class RawHidListener extends events.EventEmitter {
 }
 const STORE_PATH = path.join(os.homedir(), ".lens", "settings.json");
 const DEFAULTS = {
-  opacity: 1,
-  alwaysOnTop: true,
+  opacity: 0.85,
   showUnderglow: false,
   layout: "us",
   layerNames: [],
   overlayMode: false,
-  overlayAutoShow: true
+  overlayAutoShow: true,
+  hoverMode: false
 };
 function clamp(v, min, max) {
   return Math.max(min, Math.min(max, v));
@@ -316,12 +337,12 @@ function clamp(v, min, max) {
 function sanitize(s) {
   return {
     opacity: clamp(typeof s.opacity === "number" ? s.opacity : DEFAULTS.opacity, 0.1, 1),
-    alwaysOnTop: typeof s.alwaysOnTop === "boolean" ? s.alwaysOnTop : DEFAULTS.alwaysOnTop,
     showUnderglow: typeof s.showUnderglow === "boolean" ? s.showUnderglow : DEFAULTS.showUnderglow,
     layout: typeof s.layout === "string" ? s.layout : DEFAULTS.layout,
     layerNames: Array.isArray(s.layerNames) ? s.layerNames : DEFAULTS.layerNames,
     overlayMode: typeof s.overlayMode === "boolean" ? s.overlayMode : DEFAULTS.overlayMode,
-    overlayAutoShow: typeof s.overlayAutoShow === "boolean" ? s.overlayAutoShow : DEFAULTS.overlayAutoShow
+    overlayAutoShow: typeof s.overlayAutoShow === "boolean" ? s.overlayAutoShow : DEFAULTS.overlayAutoShow,
+    hoverMode: typeof s.hoverMode === "boolean" ? s.hoverMode : DEFAULTS.hoverMode
   };
 }
 class SettingsStore {
@@ -356,13 +377,15 @@ class SettingsStore {
 let win = null;
 let overlayVisible = false;
 let overlayActive = false;
+let normalBounds = null;
+let overlayBounds = null;
 let currentModel = null;
 let activeLayer = 0;
 const store = new SettingsStore();
 const configWatcher = new ConfigWatcher();
 const hidListener = new RawHidListener();
 function createWindow() {
-  const settings = store.get();
+  store.get();
   const { width, height } = electron.screen.getPrimaryDisplay().workAreaSize;
   const w = new electron.BrowserWindow({
     width: Math.min(1270, width),
@@ -371,7 +394,7 @@ function createWindow() {
     frame: false,
     transparent: true,
     backgroundColor: "#00000000",
-    alwaysOnTop: settings.alwaysOnTop,
+    alwaysOnTop: false,
     skipTaskbar: false,
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
@@ -410,15 +433,21 @@ function applyOverlayMode(enabled) {
   if (!win) return;
   const settings = store.get();
   if (enabled) {
+    normalBounds = win.getBounds();
     win.setOpacity(settings.opacity);
     win.setAlwaysOnTop(true, "screen-saver");
-    win.setIgnoreMouseEvents(true, { forward: true });
-    win.webContents.executeJavaScript(`document.body.classList.add('overlay')`);
+    win.setIgnoreMouseEvents(!settings.hoverMode, { forward: true });
+    win.webContents.executeJavaScript(
+      `document.body.classList.add('overlay');` + (settings.hoverMode ? `document.body.classList.add('hover-mode');` : `document.body.classList.remove('hover-mode');`)
+    );
+    if (overlayBounds) win.setBounds(overlayBounds);
   } else {
+    overlayBounds = win.getBounds();
     win.setOpacity(1);
-    win.setAlwaysOnTop(settings.alwaysOnTop);
+    win.setAlwaysOnTop(false);
     win.setIgnoreMouseEvents(false);
-    win.webContents.executeJavaScript(`document.body.classList.remove('overlay')`);
+    win.webContents.executeJavaScript(`document.body.classList.remove('overlay','hover-mode');`);
+    if (normalBounds) win.setBounds(normalBounds);
   }
 }
 function toggleOverlay() {
@@ -448,13 +477,39 @@ function registerIpcHandlers() {
   electron.ipcMain.handle("lens:get-settings", () => store.get());
   electron.ipcMain.handle("lens:set-opacity", (_, v) => {
     const s = store.set({ opacity: v });
-    win == null ? void 0 : win.setOpacity(v);
+    if (overlayActive) win == null ? void 0 : win.setOpacity(v);
     return s;
   });
-  electron.ipcMain.handle("lens:set-always-on-top", (_, v) => {
-    const s = store.set({ alwaysOnTop: v });
-    if (!store.get().overlayMode) win == null ? void 0 : win.setAlwaysOnTop(v);
+  electron.ipcMain.handle("lens:set-hover-mode", (_, v) => {
+    const s = store.set({ hoverMode: v });
+    if (overlayActive && overlayVisible) {
+      win == null ? void 0 : win.setIgnoreMouseEvents(!v, { forward: true });
+      win == null ? void 0 : win.webContents.executeJavaScript(
+        v ? `document.body.classList.add('hover-mode');` : `document.body.classList.remove('hover-mode');`
+      );
+    }
+    win == null ? void 0 : win.webContents.send("lens:settings", s);
     return s;
+  });
+  electron.ipcMain.on("win:move", (_, x, y) => {
+    win == null ? void 0 : win.setPosition(Math.round(x), Math.round(y));
+  });
+  electron.ipcMain.on("win:resize", (_, dir, dx, dy) => {
+    if (!win) return;
+    const [wx, wy] = win.getPosition();
+    const [ww, wh] = win.getSize();
+    let nx = wx, ny = wy, nw = ww, nh = wh;
+    if (dir.includes("e")) nw = Math.max(400, ww + dx);
+    if (dir.includes("s")) nh = Math.max(200, wh + dy);
+    if (dir.includes("w")) {
+      nx = wx + dx;
+      nw = Math.max(400, ww - dx);
+    }
+    if (dir.includes("n")) {
+      ny = wy + dy;
+      nh = Math.max(200, wh - dy);
+    }
+    win.setBounds({ x: nx, y: ny, width: nw, height: nh });
   });
   electron.ipcMain.handle("lens:set-show-underglow", (_, v) => store.set({ showUnderglow: v }));
   electron.ipcMain.handle("lens:set-layout", (_, v) => store.set({ layout: v }));

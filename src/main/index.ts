@@ -12,6 +12,8 @@ declare const MAIN_WINDOW_VITE_NAME: string;
 let win: BrowserWindow | null = null;
 let overlayVisible = false;
 let overlayActive = false;
+let normalBounds: Electron.Rectangle | null = null;
+let overlayBounds: Electron.Rectangle | null = null;
 let currentModel: KeyboardModel | null = null;
 let activeLayer = 0;
 
@@ -30,7 +32,7 @@ function createWindow(): BrowserWindow {
     frame: false,
     transparent: true,
     backgroundColor: "#00000000",
-    alwaysOnTop: settings.alwaysOnTop,
+    alwaysOnTop: false,
     skipTaskbar: false,
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
@@ -79,15 +81,22 @@ function applyOverlayMode(enabled: boolean): void {
   if (!win) return;
   const settings = store.get();
   if (enabled) {
+    normalBounds = win.getBounds();
     win.setOpacity(settings.opacity);
     win.setAlwaysOnTop(true, "screen-saver");
-    win.setIgnoreMouseEvents(true, { forward: true });
-    win.webContents.executeJavaScript(`document.body.classList.add('overlay')`);
+    win.setIgnoreMouseEvents(!settings.hoverMode, { forward: true });
+    win.webContents.executeJavaScript(
+      `document.body.classList.add('overlay');` +
+      (settings.hoverMode ? `document.body.classList.add('hover-mode');` : `document.body.classList.remove('hover-mode');`)
+    );
+    if (overlayBounds) win.setBounds(overlayBounds);
   } else {
+    overlayBounds = win.getBounds();
     win.setOpacity(1.0);
-    win.setAlwaysOnTop(settings.alwaysOnTop);
+    win.setAlwaysOnTop(false);
     win.setIgnoreMouseEvents(false);
-    win.webContents.executeJavaScript(`document.body.classList.remove('overlay')`);
+    win.webContents.executeJavaScript(`document.body.classList.remove('overlay','hover-mode');`);
+    if (normalBounds) win.setBounds(normalBounds);
   }
 }
 
@@ -136,14 +145,37 @@ function registerIpcHandlers(): void {
 
   ipcMain.handle("lens:set-opacity", (_, v: number): LensSettings => {
     const s = store.set({ opacity: v });
-    win?.setOpacity(v);
+    if (overlayActive) win?.setOpacity(v);
     return s;
   });
 
-  ipcMain.handle("lens:set-always-on-top", (_, v: boolean): LensSettings => {
-    const s = store.set({ alwaysOnTop: v });
-    if (!store.get().overlayMode) win?.setAlwaysOnTop(v);
+  ipcMain.handle("lens:set-hover-mode", (_, v: boolean): LensSettings => {
+    const s = store.set({ hoverMode: v });
+    if (overlayActive && overlayVisible) {
+      win?.setIgnoreMouseEvents(!v, { forward: true });
+      win?.webContents.executeJavaScript(
+        v ? `document.body.classList.add('hover-mode');`
+          : `document.body.classList.remove('hover-mode');`
+      );
+    }
+    win?.webContents.send("lens:settings", s);
     return s;
+  });
+
+  ipcMain.on("win:move", (_, x: number, y: number) => {
+    win?.setPosition(Math.round(x), Math.round(y));
+  });
+
+  ipcMain.on("win:resize", (_, dir: string, dx: number, dy: number) => {
+    if (!win) return;
+    const [wx, wy] = win.getPosition();
+    const [ww, wh] = win.getSize();
+    let nx = wx, ny = wy, nw = ww, nh = wh;
+    if (dir.includes("e")) nw = Math.max(400, ww + dx);
+    if (dir.includes("s")) nh = Math.max(200, wh + dy);
+    if (dir.includes("w")) { nx = wx + dx; nw = Math.max(400, ww - dx); }
+    if (dir.includes("n")) { ny = wy + dy; nh = Math.max(200, wh - dy); }
+    win.setBounds({ x: nx, y: ny, width: nw, height: nh });
   });
 
   ipcMain.handle("lens:set-show-underglow", (_, v: boolean): LensSettings => store.set({ showUnderglow: v }));

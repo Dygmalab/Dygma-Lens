@@ -27,12 +27,12 @@ export interface LensConfig {
 
 export interface LensSettings {
   opacity: number;
-  alwaysOnTop: boolean;
   showUnderglow: boolean;
   layout: string;
   layerNames: string[];
   overlayMode: boolean;
   overlayAutoShow: boolean;
+  hoverMode: boolean;
 }
 
 export interface LensState {
@@ -53,9 +53,9 @@ export type IpcChannel =
   | "lens:get-state"
   | "lens:get-settings"
   | "lens:set-opacity"
-  | "lens:set-always-on-top"
   | "lens:set-show-underglow"
   | "lens:set-layout"
   | "lens:set-layer-name"
   | "lens:set-overlay"
-  | "lens:set-overlay-auto-show";
+  | "lens:set-overlay-auto-show"
+  | "lens:set-hover-mode";

@@ -6,13 +6,13 @@ import type { LensSettings } from "../shared/types";
 const STORE_PATH = path.join(os.homedir(), ".lens", "settings.json");
 
 const DEFAULTS: LensSettings = {
-  opacity: 1.0,
-  alwaysOnTop: true,
+  opacity: 0.85,
   showUnderglow: false,
   layout: "us",
   layerNames: [],
   overlayMode: false,
   overlayAutoShow: true,
+  hoverMode: false,
 };
 
 function clamp(v: number, min: number, max: number): number {
@@ -22,12 +22,12 @@ function clamp(v: number, min: number, max: number): number {
 function sanitize(s: Partial<LensSettings>): LensSettings {
   return {
     opacity: clamp(typeof s.opacity === "number" ? s.opacity : DEFAULTS.opacity, 0.1, 1.0),
-    alwaysOnTop: typeof s.alwaysOnTop === "boolean" ? s.alwaysOnTop : DEFAULTS.alwaysOnTop,
     showUnderglow: typeof s.showUnderglow === "boolean" ? s.showUnderglow : DEFAULTS.showUnderglow,
     layout: typeof s.layout === "string" ? s.layout : DEFAULTS.layout,
     layerNames: Array.isArray(s.layerNames) ? s.layerNames : DEFAULTS.layerNames,
     overlayMode: typeof s.overlayMode === "boolean" ? s.overlayMode : DEFAULTS.overlayMode,
     overlayAutoShow: typeof s.overlayAutoShow === "boolean" ? s.overlayAutoShow : DEFAULTS.overlayAutoShow,
+    hoverMode: typeof s.hoverMode === "boolean" ? s.hoverMode : DEFAULTS.hoverMode,
   };
 }
 
