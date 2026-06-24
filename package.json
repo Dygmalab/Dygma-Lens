@@ -2,6 +2,8 @@
   "name": "lens",
   "version": "0.1.0",
   "description": "Dygma Lens – keyboard overlay companion for Bazecor",
+  "author": "Dygma Lab S.L.",
+  "productName": "Dygma Lens",
   "main": ".vite/build/index.js",
   "scripts": {
     "start": "electron-forge start",

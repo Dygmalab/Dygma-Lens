@@ -12,7 +12,7 @@ const config: ForgeConfig = {
     asar: true,
     name: "Dygma Lens",
     executableName: "dygma-lens",
-    icon: "./build/logo",
+    icon: "./src/static/Logo",
     appBundleId: "com.dygmalab.lens",
   },
   rebuildConfig: {},
