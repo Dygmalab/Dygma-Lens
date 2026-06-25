@@ -3,10 +3,28 @@ import path from "path";
 import { globSync } from "glob";
 import type { KeyboardModel, LensConfig } from "../shared/types";
 import { SONSEI_KEYS_PER_LAYER, SONSEI_COLOR_LAYER_SIZE } from "../shared/constants";
-import { parseKeymap, parsePaletteRGB, parseColormap, parseSuperkeys } from "./parsers";
+import { parseKeymap, parsePaletteRGB, parseColormap, parseSuperkeys, parseNames } from "./parsers";
+
+interface BazecorNeuronLayer {
+  id: number;
+  name: string;
+}
+
+interface BazecorNeuronSuperkey {
+  id: number;
+  name: string;
+  actions?: number[];
+}
+
+interface BazecorNeuron {
+  layers?: BazecorNeuronLayer[];
+  superkeys?: BazecorNeuronSuperkey[];
+  macros?: { id: number; name?: string }[];
+}
 
 interface BazecorBackup {
   neuronID: string;
+  neuron?: BazecorNeuron;
   backup: { command: string; data: string }[];
 }
 
@@ -43,12 +61,30 @@ export function parseBackupToModel(backupRaw: string, product: string): Keyboard
   const defaultLayerRaw = getCommandData(backup, "settings.defaultLayer");
   const superkeysRaw = getCommandData(backup, "superkeys.map");
 
+  // Names are stored in backup.neuron (Bazecor electron-store), not in Focus commands.
+  // Sort by id to guarantee index alignment with keymap codes.
+  const neuron = backup.neuron;
+  const layerNames = neuron?.layers
+    ?.slice().sort((a, b) => a.id - b.id)
+    .map(l => l.name) ?? parseNames(getCommandData(backup, "layers.names"));
+
+  const superkeyNames = neuron?.superkeys
+    ?.slice().sort((a, b) => a.id - b.id)
+    .map(s => s.name) ?? parseNames(getCommandData(backup, "superkeys.names"));
+
+  const macroNames = neuron?.macros
+    ?.slice().sort((a, b) => a.id - b.id)
+    .map(m => m.name ?? "") ?? parseNames(getCommandData(backup, "macros.names"));
+
   return {
     keymap: parseKeymap(keymapRaw, kpl),
     palette: parsePaletteRGB(paletteRaw),
     colormap: parseColormap(colormapRaw, cls),
     defaultLayer: parseInt(defaultLayerRaw.trim() || "0", 10),
     superkeys: parseSuperkeys(superkeysRaw),
+    superkeyNames,
+    macroNames,
+    layerNames,
   };
 }
 

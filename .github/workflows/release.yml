@@ -1,0 +1,156 @@
+name: Release
+
+on:
+  push:
+    branches:
+      - "main"
+  pull_request:
+    branches:
+      - "main"
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: write
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+          - os: windows-2022
+          - os: ubuntu-22.04
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.14.0
+
+      - if: runner.os == 'Linux'
+        name: Install Linux HID dependencies
+        run: sudo apt update && sudo apt install -y libudev-dev
+
+      - name: Cache node_modules
+        id: cache-node-modules
+        uses: actions/cache@v4
+        with:
+          path: node_modules
+          key: ${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('package.json', 'package-lock.json') }}
+
+      - name: Install dependencies
+        if: steps.cache-node-modules.outputs.cache-hit != 'true'
+        run: npm ci
+
+      # ── macOS: import certificate into a temporary keychain ──────────────────
+      - if: runner.os == 'macOS'
+        name: Setup Apple certificates
+        env:
+          APPLE_APPLICATION_CERT_BASE64: ${{ secrets.APPLE_APPLICATION_CERT_BASE64 }}
+          APPLE_CERT_PASSWORD: ${{ secrets.APPLE_CERT_PASSWORD }}
+          APPLE_KEYCHAIN_PASSWORD: ${{ secrets.APPLE_KEYCHAIN_PASSWORD }}
+        run: |
+          APPLE_APPLICATION_CERT_PATH=$RUNNER_TEMP/apple_application.p12
+          KEYCHAIN_PATH=$RUNNER_TEMP/apple-signing.keychain-db
+          echo -n "$APPLE_APPLICATION_CERT_BASE64" | base64 --decode -o $APPLE_APPLICATION_CERT_PATH
+          security create-keychain -p "$APPLE_KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
+          security set-keychain-settings -lut 21600 $KEYCHAIN_PATH
+          security unlock-keychain -p "$APPLE_KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
+          security import $APPLE_APPLICATION_CERT_PATH -P "$APPLE_CERT_PASSWORD" -A -t cert -f pkcs12 -k $KEYCHAIN_PATH
+          security list-keychain -d user -s $KEYCHAIN_PATH
+
+      # ── macOS: build Intel (x64) and ARM (arm64) separately ──────────────────
+      - if: runner.os == 'macOS'
+        name: Build for macOS Intel (x64)
+        env:
+          APPLE_IDENTITY: ${{ secrets.APPLE_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLEID }}
+          APPLE_ID_PASSWORD: ${{ secrets.APPLEIDPASS }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: npm run make -- --arch=x64
+
+      - if: runner.os == 'macOS'
+        name: Build for macOS ARM (arm64)
+        env:
+          APPLE_IDENTITY: ${{ secrets.APPLE_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLEID }}
+          APPLE_ID_PASSWORD: ${{ secrets.APPLEIDPASS }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: npm run make -- --arch=arm64
+
+      # ── Windows / Linux ───────────────────────────────────────────────────────
+      - if: runner.os != 'macOS'
+        name: Build
+        run: npm run make
+
+      # ── Upload all artifacts from this runner ─────────────────────────────────
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: artifacts-${{ runner.os }}
+          path: |
+            out/make/**/*.dmg
+            out/make/**/*.zip
+            out/make/**/*.AppImage
+            out/make/**/*.exe
+            out/make/**/*.nupkg
+
+  release:
+    needs: [build]
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: write
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.14.0
+
+      - name: Cache node_modules
+        id: cache-node-modules
+        uses: actions/cache@v4
+        with:
+          path: node_modules
+          key: release-${{ hashFiles('package.json', 'package-lock.json') }}
+
+      - name: Install dependencies
+        if: steps.cache-node-modules.outputs.cache-hit != 'true'
+        run: npm ci
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: ${{ github.workspace }}/artifacts
+
+      - name: Collect artifacts into dist/
+        run: |
+          mkdir -p dist
+          find ${{ github.workspace }}/artifacts -name '*.dmg'      -exec cp -v {} dist \;
+          find ${{ github.workspace }}/artifacts -name '*.zip'      -exec cp -v {} dist \;
+          find ${{ github.workspace }}/artifacts -name '*.AppImage' -exec cp -v {} dist \;
+          find ${{ github.workspace }}/artifacts -name '*.exe'      -exec cp -v {} dist \;
+          find ${{ github.workspace }}/artifacts -name '*.nupkg'    -exec cp -v {} dist \;
+          ls -R dist
+
+      - name: Upload release bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: release
+          path: ${{ github.workspace }}/dist
+
+      - name: Run semantic-release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GH_ACCESS_TOKEN }}
+        run: npx semantic-release

@@ -14,6 +14,28 @@ const config: ForgeConfig = {
     executableName: "dygma-lens",
     icon: "./src/static/Logo",
     appBundleId: "com.dygmalab.lens",
+    // Only sign when an Apple signing identity is present (set in GitHub Actions secrets).
+    // Without this, node-hid fails on macOS because the native .node addon is blocked
+    // by Hardened Runtime. The USB entitlement is required for HID device access.
+    ...(process.env.APPLE_IDENTITY
+      ? {
+          osxSign: {
+            identity: process.env.APPLE_IDENTITY,
+            entitlements: "entitlements.mac.plist",
+            entitlementsInherit: "entitlements.mac.plist",
+            hardenedRuntime: true,
+          },
+          ...(process.env.APPLE_ID
+            ? {
+                osxNotarize: {
+                  appleId: process.env.APPLE_ID,
+                  appleIdPassword: process.env.APPLE_ID_PASSWORD!,
+                  teamId: process.env.APPLE_TEAM_ID!,
+                },
+              }
+            : {}),
+        }
+      : {}),
   },
   rebuildConfig: {},
   makers: [

@@ -46,22 +46,29 @@ const FUNCTION: Record<number, string> = {
 
 export { layoutOverrides } from "./layouts";
 
-const MOD_TAP_MIN = 0x100;
-const MOD_TAP_MAX = 0x1ff;
-const LAYER_SHIFT_MIN = 0x4000;
-const LAYER_SHIFT_MAX = 0x40ff;
-const LAYER_LOCK_MIN = 0x4100;
-const LAYER_LOCK_MAX = 0x41ff;
-const LAYER_MOVE_MIN = 0x4200;
-const LAYER_MOVE_MAX = 0x42ff;
-const MACRO_MIN = 0xd21c;
-const MACRO_MAX = 0xffff;
-const SUPERKEY_MIN = 0x53a0;
-const SUPERKEY_MAX = 0x53bf;
+// Layer key codes — verified against Bazecor src/api/keymap/db/layerswitch.tsx
+const LAYER_LOCK_MIN  = 17408;  // LockLayerTable  layer 1-10
+const LAYER_LOCK_MAX  = 17417;
+const LAYER_SHIFT_MIN = 17450;  // ShiftToLayerTable layer 1-10
+const LAYER_SHIFT_MAX = 17459;
+const LAYER_MOVE_MIN  = 17492;  // MoveToLayerTable  layer 1-10
+const LAYER_MOVE_MAX  = 17501;
 
-const MOD_NAMES = ["Ctrl", "Shift", "Alt", "OS"] as const;
+// One-shot layer — db/oneshot.tsx layer 1-8
+const LAYER_ONESHOT_MIN = 49161;
+const LAYER_ONESHOT_MAX = 49168;
 
-function modBitsToString(modByte: number): string {
+// Dual-use layer — db/dualuse.tsx: base 51218 + (layerIdx)*256 + keyCode, layers 1-8
+const LAYER_DUAL_MIN = 51218;
+const LAYER_DUAL_MAX = 53265;
+
+// Macros and superkeys — verified against Bazecor src/api/keymap/db/macros.ts & superkeys.ts
+const MACRO_MIN     = 53852;  // 53852 + index (128 macros)
+const MACRO_MAX     = 53979;
+const SUPERKEY_MIN  = 53980;  // 53980 + index (128 superkeys)
+const SUPERKEY_MAX  = 54107;
+
+function modBitsToArray(modByte: number): string[] {
   const mods: string[] = [];
   if (modByte & 0x01) mods.push("Ctrl");
   if (modByte & 0x02) mods.push("Shift");
@@ -71,7 +78,11 @@ function modBitsToString(modByte: number): string {
   if (modByte & 0x20) mods.push("Shift");
   if (modByte & 0x40) mods.push("AltGr");
   if (modByte & 0x80) mods.push("OS");
-  return [...new Set(mods)].join("+");
+  return [...new Set(mods)];
+}
+
+function modBitsToString(modByte: number): string {
+  return modBitsToArray(modByte).join("+");
 }
 
 export function superkeyIndex(code: number): number | null {
@@ -79,49 +90,60 @@ export function superkeyIndex(code: number): number | null {
   return null;
 }
 
-export function decodeKey(code: number, layout: Record<number, string> = {}): DecodedKey {
-  if (code === 0 || code === 1) return { primary: "", hold: "" };
+function layerName(num: number, layerNames: string[]): string {
+  return layerNames[num - 1] || `L${num}`;
+}
 
+function decodeLayerKey(code: number, layerNames: string[], layout: Record<number, string>): DecodedKey | null {
+  if (code >= LAYER_LOCK_MIN && code <= LAYER_LOCK_MAX)
+    return { primary: layerName(code - LAYER_LOCK_MIN + 1, layerNames), hold: "lock" };
+  if (code >= LAYER_SHIFT_MIN && code <= LAYER_SHIFT_MAX)
+    return { primary: layerName(code - LAYER_SHIFT_MIN + 1, layerNames), hold: "shft" };
+  if (code >= LAYER_MOVE_MIN && code <= LAYER_MOVE_MAX)
+    return { primary: `>${layerName(code - LAYER_MOVE_MIN + 1, layerNames)}`, hold: "move" };
+  if (code >= LAYER_ONESHOT_MIN && code <= LAYER_ONESHOT_MAX)
+    return { primary: layerName(code - LAYER_ONESHOT_MIN + 1, layerNames), hold: "1shot" };
+  if (code >= LAYER_DUAL_MIN && code <= LAYER_DUAL_MAX) {
+    const layerIdx = Math.trunc((code - LAYER_DUAL_MIN) / 256);
+    const tapLabel = layout[(code - LAYER_DUAL_MIN) % 256] ?? BASE[(code - LAYER_DUAL_MIN) % 256] ?? "";
+    const name = layerName(layerIdx + 1, layerNames);
+    return { primary: tapLabel || name, hold: name };
+  }
+  return null;
+}
+
+export function decodeKey(
+  code: number,
+  layout: Record<number, string> = {},
+  layerNames: string[] = [],
+  macroNames: string[] = [],
+): DecodedKey {
+  if (code === 0) return { primary: "NoKey", hold: "" };
+  if (code === 1 || code === 65535) return { primary: "Trans", hold: "" };
   if (layout[code]) return { primary: layout[code], hold: "" };
-
   if (BASE[code] !== undefined) return { primary: BASE[code], hold: "" };
   if (ONE_SHOT_MOD[code]) return { primary: ONE_SHOT_MOD[code], hold: "" };
   if (FUNCTION[code]) return { primary: FUNCTION[code], hold: "" };
 
-  if (code >= MOD_TAP_MIN && code <= MOD_TAP_MAX) {
-    const modByte = (code >> 0) & 0xf0;
-    const base = code & 0x0ff;
-    const baseLabel = layout[base] ?? BASE[base] ?? `#${base}`;
-    const hold = modBitsToString(modByte >> 4);
-    return { primary: baseLabel, hold };
-  }
+  const layerKey = decodeLayerKey(code, layerNames, layout);
+  if (layerKey) return layerKey;
 
-  if (code >= LAYER_SHIFT_MIN && code <= LAYER_SHIFT_MAX) {
-    const layer = code - LAYER_SHIFT_MIN;
-    return { primary: "", hold: `L${layer}` };
-  }
-
-  if (code >= LAYER_LOCK_MIN && code <= LAYER_LOCK_MAX) {
-    const layer = code - LAYER_LOCK_MIN;
-    return { primary: `L${layer}`, hold: "" };
-  }
-
-  if (code >= LAYER_MOVE_MIN && code <= LAYER_MOVE_MAX) {
-    const layer = code - LAYER_MOVE_MIN;
-    return { primary: `→L${layer}`, hold: "" };
-  }
-
-  if (code >= SUPERKEY_MIN && code <= SUPERKEY_MAX) {
-    const idx = code - SUPERKEY_MIN;
-    return { primary: `SK${idx}`, hold: "" };
-  }
+  if (code >= SUPERKEY_MIN && code <= SUPERKEY_MAX)
+    return { primary: `SK${code - SUPERKEY_MIN}`, hold: "" };
 
   if (code >= MACRO_MIN && code <= MACRO_MAX) {
     const idx = code - MACRO_MIN;
-    return { primary: `M${idx}`, hold: "" };
+    return { primary: "Macro", subtitle: macroNames[idx] || `M${idx + 1}`, hold: "" };
+  }
+
+  // Key + modifier combination: high byte = modifier flags, low byte = HID keycode.
+  // Checked last so all named ranges above take priority.
+  const modFlags = (code >> 8) & 0xff;
+  const baseCode = code & 0xff;
+  if (modFlags !== 0) {
+    const baseLabel = layout[baseCode] ?? BASE[baseCode];
+    if (baseLabel) return { primary: baseLabel, hold: "", modifiers: modBitsToArray(modFlags) };
   }
 
   return { primary: `#${code}`, hold: "" };
 }
-
-void MOD_NAMES;

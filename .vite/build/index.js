@@ -72,12 +72,19 @@ function parseSuperkeys(raw) {
   const nums = raw.trim().split(/\s+/).map(Number);
   const ACTIONS_PER_SUPERKEY = 5;
   const out = [];
-  for (let i = 0; i < nums.length; i += ACTIONS_PER_SUPERKEY) {
-    const chunk = nums.slice(i, i + ACTIONS_PER_SUPERKEY);
-    if (chunk.every((n) => n === 0)) break;
-    out.push(chunk);
+  for (let i = 0; i + ACTIONS_PER_SUPERKEY <= nums.length; i += ACTIONS_PER_SUPERKEY) {
+    out.push(nums.slice(i, i + ACTIONS_PER_SUPERKEY));
   }
   return out;
+}
+function parseNames(raw) {
+  if (!raw.trim()) return [];
+  try {
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed)) return parsed.map(String);
+  } catch {
+  }
+  return raw.trim().split(/\s+/);
 }
 function getCommandData(backup, command) {
   var _a;
@@ -100,6 +107,7 @@ function colorLayerSize(product) {
   }
 }
 function parseBackupToModel(backupRaw, product) {
+  var _a, _b, _c;
   const backup = JSON.parse(backupRaw);
   const kpl = keysPerLayer(product);
   const cls = colorLayerSize(product);
@@ -108,12 +116,19 @@ function parseBackupToModel(backupRaw, product) {
   const colormapRaw = getCommandData(backup, "colormap.map");
   const defaultLayerRaw = getCommandData(backup, "settings.defaultLayer");
   const superkeysRaw = getCommandData(backup, "superkeys.map");
+  const neuron = backup.neuron;
+  const layerNames = ((_a = neuron == null ? void 0 : neuron.layers) == null ? void 0 : _a.slice().sort((a, b) => a.id - b.id).map((l) => l.name)) ?? parseNames(getCommandData(backup, "layers.names"));
+  const superkeyNames = ((_b = neuron == null ? void 0 : neuron.superkeys) == null ? void 0 : _b.slice().sort((a, b) => a.id - b.id).map((s) => s.name)) ?? parseNames(getCommandData(backup, "superkeys.names"));
+  const macroNames = ((_c = neuron == null ? void 0 : neuron.macros) == null ? void 0 : _c.slice().sort((a, b) => a.id - b.id).map((m) => m.name ?? "")) ?? parseNames(getCommandData(backup, "macros.names"));
   return {
     keymap: parseKeymap(keymapRaw, kpl),
     palette: parsePaletteRGB(paletteRaw),
     colormap: parseColormap(colormapRaw, cls),
     defaultLayer: parseInt(defaultLayerRaw.trim() || "0", 10),
-    superkeys: parseSuperkeys(superkeysRaw)
+    superkeys: parseSuperkeys(superkeysRaw),
+    superkeyNames,
+    macroNames,
+    layerNames
   };
 }
 function findLatestBackup(config) {

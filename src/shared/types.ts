@@ -12,6 +12,9 @@ export interface KeyboardModel {
   colormap: number[][];
   defaultLayer: number;
   superkeys: number[][];
+  superkeyNames: string[];
+  macroNames: string[];
+  layerNames: string[];
 }
 
 export interface LensConfig {
@@ -44,6 +47,8 @@ export interface LensState {
 export interface DecodedKey {
   primary: string;
   hold: string;
+  subtitle?: string;    // second line at same size as primary (superkey name, macro name)
+  modifiers?: string[]; // modifier tag boxes shown at bottom
 }
 
 export type IpcChannel =

@@ -11,9 +11,27 @@ interface Props {
 }
 
 const SVG_W = 1270;
-const SVG_H = 560;
+const SVG_H = 560;   // full coordinate space (key positions reference this)
+const VIEW_Y = 50;   // 27 px above topmost key corners (~y=77 after 10° rotation)
+const VIEW_H = 462;  // bottom = 512, giving 10px below the innermost thumb key paths
+                     // (thumb arcs extend to ~y=503 after rotation — wider than the rect bounds)
 const FS = 13;
+const FSS = 11; // two-line keys (Super/name, Macro/name) — same size both lines
 const FSH = 9;
+const MOD_BOX_H = 9;
+const MOD_BOX_GAP = 2;
+const MOD_BOX_FS = 6;
+const MOD_BOX_PX = 3;
+// Approximate char width at MOD_BOX_FS for system-ui proportional font
+const MOD_CHAR_W = 3.5;
+const MOD_WIDTH: Record<string, number> = {
+  Ctrl: 4, Shift: 5, Alt: 3, AltGr: 5, OS: 2,
+};
+
+function modBoxWidth(label: string): number {
+  const chars = MOD_WIDTH[label] ?? label.length;
+  return chars * MOD_CHAR_W + MOD_BOX_PX * 2;
+}
 
 // Outer silhouette paths for each Sonsei thumb key type (from Bazecor Key.tsx)
 const THUMB_PATHS: Record<number, string> = {
@@ -48,6 +66,8 @@ export const KeyboardView: React.FC<Props> = ({ model, activeLayer, layout, laye
   const keymapLayer = model.keymap[layer] ?? [];
   const colormapLayer = model.colormap[layer] ?? [];
   const palette = model.palette;
+  const names = model.layerNames?.length ? model.layerNames : (layerNames ?? []);
+  const macroNames = model.macroNames ?? [];
 
   function getColor(ledIndex: number) {
     const pi = colormapLayer[ledIndex] ?? 0;
@@ -59,31 +79,49 @@ export const KeyboardView: React.FC<Props> = ({ model, activeLayer, layout, laye
     const code = keymapLayer[keyIndex] ?? 0;
     const sk = superkeyIndex(code);
     if (sk !== null) {
-      const acts = model.superkeys[sk];
-      if (acts?.[0]) { const t = decodeKey(acts[0], overrides); return { primary: t.primary || `SK${sk}`, hold: "SK" }; }
-      return { primary: `SK${sk}`, hold: "SK" };
+      const name = model.superkeyNames?.[sk] || `SK${sk + 1}`;
+      return { primary: "Super", subtitle: name, hold: "" };
     }
-    return decodeKey(code, overrides);
+    return decodeKey(code, overrides, names, macroNames);
   }
 
   function renderKey(key: (typeof SONSEI_KEYS)[0]) {
     const color = getColor(key.ledIndex);
     const label = getLabel(key.index);
-    const thumbPath = THUMB_PATHS[key.index];
     const fgColor = fg(color.r, color.g, color.b);
+    const hasSub = Boolean(label.subtitle);
+    const mods = label.modifiers ?? [];
+    const hasMods = mods.length > 0;
 
+    const thumbPath = THUMB_PATHS[key.index];
     if (thumbPath) {
       const [tx, ty, tr] = THUMB_TEXT[key.index] ?? [28, 24, 0];
+      const rot = tr === 0 ? undefined : `rotate(${tr},${tx},${ty})`;
+      let thumbLabel: JSX.Element | null = null;
+      if (hasSub) {
+        thumbLabel = (
+          <g transform={rot}>
+            <text x={tx} y={ty - 6} textAnchor="middle" dominantBaseline="middle"
+              fontSize={FSS} fontWeight="700" fontFamily="system-ui,-apple-system,sans-serif"
+              fill={fgColor} pointerEvents="none">{label.primary}</text>
+            <text x={tx} y={ty + 6} textAnchor="middle" dominantBaseline="middle"
+              fontSize={FSS} fontWeight="700" fontFamily="system-ui,-apple-system,sans-serif"
+              fill={fgColor} pointerEvents="none">{label.subtitle}</text>
+          </g>
+        );
+      } else if (label.primary) {
+        thumbLabel = (
+          <text x={tx} y={ty} textAnchor="middle" dominantBaseline="middle"
+            transform={rot} fontSize={FS} fontWeight="700"
+            fontFamily="system-ui,-apple-system,sans-serif"
+            fill={fgColor} pointerEvents="none">{label.primary}</text>
+        );
+      }
       return (
         <g key={`k-${key.index}`} transform={`translate(${key.x},${key.y})`}>
           <path d={thumbPath} fill="#303949" />
           <path d={thumbPath} fill={color.css} />
-          {label.primary && (
-            <text x={tx} y={ty} textAnchor="middle" dominantBaseline="middle"
-              transform={tr !== 0 ? `rotate(${tr},${tx},${ty})` : undefined}
-              fontSize={FS} fontWeight="700" fontFamily="system-ui,-apple-system,sans-serif"
-              fill={fgColor} pointerEvents="none">{label.primary}</text>
-          )}
+          {thumbLabel}
         </g>
       );
     }
@@ -91,39 +129,85 @@ export const KeyboardView: React.FC<Props> = ({ model, activeLayer, layout, laye
     const { x, y, w, h } = key;
     const cx = x + 4 + (w - 8) / 2;
     const cy = y + (h - 8) / 2;
+
+    let primaryY = cy + 1;
+    if (hasMods) primaryY = cy - 5;
+    else if (label.hold) primaryY = cy - 2;
+
+    let primaryContent: JSX.Element | null = null;
+    if (hasSub) {
+      primaryContent = (
+        <>
+          <text x={cx} y={cy - 6} textAnchor="middle" dominantBaseline="middle"
+            fontSize={FSS} fontWeight="700" fontFamily="system-ui,-apple-system,sans-serif"
+            fill={fgColor} pointerEvents="none">{label.primary}</text>
+          <text x={cx} y={cy + 6} textAnchor="middle" dominantBaseline="middle"
+            fontSize={FSS} fontWeight="700" fontFamily="system-ui,-apple-system,sans-serif"
+            fill={fgColor} pointerEvents="none">{label.subtitle}</text>
+        </>
+      );
+    } else if (label.primary) {
+      primaryContent = (
+        <text x={cx} y={primaryY} textAnchor="middle" dominantBaseline="middle"
+          fontSize={FS} fontWeight="700" fontFamily="system-ui,-apple-system,sans-serif"
+          fill={fgColor} pointerEvents="none">{label.primary}</text>
+      );
+    }
+
+    let secondaryContent: JSX.Element[] | JSX.Element | null = null;
+    if (hasMods) {
+      const totalW = mods.reduce((s, m) => s + modBoxWidth(m), 0) + MOD_BOX_GAP * (mods.length - 1);
+      const boxY = y + h - 6 - MOD_BOX_H;
+      let bx = cx - totalW / 2;
+      secondaryContent = mods.map((m) => {
+        const bw = modBoxWidth(m);
+        const el = (
+          <g key={m}>
+            <rect x={bx} y={boxY} width={bw} height={MOD_BOX_H} rx={2}
+              fill="rgba(0,0,0,0.28)" stroke="rgba(255,255,255,0.18)" strokeWidth={0.5} />
+            <text x={bx + bw / 2} y={boxY + MOD_BOX_H / 2 + 0.5}
+              textAnchor="middle" dominantBaseline="middle"
+              fontSize={MOD_BOX_FS} fontWeight="600"
+              fontFamily="system-ui,-apple-system,sans-serif"
+              fill={fgColor} pointerEvents="none">{m}</text>
+          </g>
+        );
+        bx += bw + MOD_BOX_GAP;
+        return el;
+      });
+    } else if (label.hold) {
+      secondaryContent = (
+        <text x={cx} y={y + h - 10} textAnchor="middle" dominantBaseline="middle"
+          fontSize={FSH} fontWeight="600" fontFamily="system-ui,-apple-system,sans-serif"
+          fill={fgColor} opacity={0.7} pointerEvents="none">{label.hold}</text>
+      );
+    }
+
     return (
       <g key={`k-${key.index}`}>
         <rect x={x} y={y} width={w} height={h} rx={4} fill="#303949" />
         <rect x={x + 4} y={y} width={w - 8} height={h - 8} rx={4} fill={color.css} />
-        {label.primary && (
-          <text x={cx} y={label.hold ? cy - 2 : cy + 1} textAnchor="middle" dominantBaseline="middle"
-            fontSize={FS} fontWeight="700" fontFamily="system-ui,-apple-system,sans-serif"
-            fill={fgColor} pointerEvents="none">{label.primary}</text>
-        )}
-        {label.hold && (
-          <text x={cx} y={y + h - 10} textAnchor="middle" dominantBaseline="middle"
-            fontSize={FSH} fontWeight="600" fontFamily="system-ui,-apple-system,sans-serif"
-            fill={fgColor} opacity={0.7} pointerEvents="none">{label.hold}</text>
-        )}
+        {primaryContent}
+        {secondaryContent}
       </g>
     );
   }
 
   const leftKeys = SONSEI_KEYS.filter((k) => k.group === "left");
   const rightKeys = SONSEI_KEYS.filter((k) => k.group === "right");
-  const layerName = layerNames?.[layer] ?? `Layer ${layer}`;
+  const layerName = names[layer] ?? `Layer ${layer}`;
 
   return (
-    <div className="keyboard-view" style={{ width: "100%", height: "100%" }}>
-      <svg xmlns="http://www.w3.org/2000/svg" viewBox={`0 0 ${SVG_W} ${SVG_H}`}
-        style={{ width: "100%", height: "100%", display: "block" }}>
+    <div className="keyboard-view">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox={`0 ${VIEW_Y} ${SVG_W} ${VIEW_H}`}
+        style={{ width: "100%", display: "block" }}>
         <g id="keyshapes-left" transform="rotate(10, 320, 680)">
           {leftKeys.map(renderKey)}
         </g>
         <g id="keyshapes-right" transform="rotate(-10, 960, 680)">
           {rightKeys.map(renderKey)}
         </g>
-        <text x={SVG_W / 2} y={SVG_H - 12} textAnchor="middle" fontSize={13}
+        <text x={SVG_W / 2} y={VIEW_Y + VIEW_H - 12} textAnchor="middle" fontSize={13}
           fill="rgba(255,255,255,0.35)" fontFamily="system-ui,-apple-system,sans-serif"
           className="layer-label">{layerName}</text>
       </svg>

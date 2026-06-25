@@ -43,12 +43,19 @@ export function parseSuperkeys(raw: string): number[][] {
   const nums = raw.trim().split(/\s+/).map(Number);
   const ACTIONS_PER_SUPERKEY = 5;
   const out: number[][] = [];
-  for (let i = 0; i < nums.length; i += ACTIONS_PER_SUPERKEY) {
-    const chunk = nums.slice(i, i + ACTIONS_PER_SUPERKEY);
-    if (chunk.every((n) => n === 0)) break;
-    out.push(chunk);
+  for (let i = 0; i + ACTIONS_PER_SUPERKEY <= nums.length; i += ACTIONS_PER_SUPERKEY) {
+    out.push(nums.slice(i, i + ACTIONS_PER_SUPERKEY));
   }
   return out;
+}
+
+export function parseNames(raw: string): string[] {
+  if (!raw.trim()) return [];
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (Array.isArray(parsed)) return parsed.map(String);
+  } catch { /* fall through to space-split */ }
+  return raw.trim().split(/\s+/);
 }
 
 export function parseActiveLayer(raw: string): number {

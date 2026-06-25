@@ -108,7 +108,7 @@ export function App() {
   }
 
   const layerCount = model.keymap.length || 1;
-  const layerNames = settings.layerNames;
+  const layerNames = model.layerNames?.length ? model.layerNames : settings.layerNames;
 
   function layerLabel(i: number): string {
     return layerNames[i] || `Layer ${i}`;
@@ -175,7 +175,7 @@ export function App() {
                       setLayerPickerOpen(false);
                     }}
                   >
-                    <span>{`Layer ${i}`}</span>
+                    <span>{layerLabel(i)}</span>
                     <input
                       type="text"
                       value={layerNames[i] ?? ""}
@@ -287,14 +287,16 @@ export function App() {
       </div>
 
       <div className={`board${settings.overlayMode ? " dimmed" : ""}`} onMouseDown={handleBoardMouseDown}>
-        <KeyboardView
-          model={model}
-          activeLayer={activeLayer}
-          layout={settings.layout}
-          layerNames={settings.layerNames}
-        />
+        <div className="keyboard-sizer">
+          <KeyboardView
+            model={model}
+            activeLayer={activeLayer}
+            layout={settings.layout}
+            layerNames={settings.layerNames}
+          />
+          <ResizeFrame />
+        </div>
       </div>
-      <ResizeFrame />
     </div>
   );
 }
