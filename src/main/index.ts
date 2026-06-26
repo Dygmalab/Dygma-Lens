@@ -14,6 +14,8 @@ let overlayVisible = false;
 let overlayActive = false;
 let normalBounds: Electron.Rectangle | null = null;
 let overlayBounds: Electron.Rectangle | null = null;
+let overlayLockedSize: { width: number; height: number } | null = null;
+let fixingOverlayResize = false;
 let currentModel: KeyboardModel | null = null;
 let activeLayer = 0;
 
@@ -53,6 +55,8 @@ function createWindow(): BrowserWindow {
     pushSettings();
   });
 
+  w.webContents.setVisualZoomLevelLimits(1, 1);
+
   return w;
 }
 
@@ -77,24 +81,50 @@ function pushState(): void {
   win?.webContents.send("lens:state", state);
 }
 
+function guardOverlayResize(): void {
+  if (!win || !overlayLockedSize || fixingOverlayResize) return;
+  const { width, height } = win.getBounds();
+  if (width !== overlayLockedSize.width || height !== overlayLockedSize.height) {
+    fixingOverlayResize = true;
+    win.setSize(overlayLockedSize.width, overlayLockedSize.height);
+    setImmediate(() => { fixingOverlayResize = false; });
+  }
+}
+
+function preventOverlayResize(e: { preventDefault(): void }): void {
+  e.preventDefault();
+}
+
 function applyOverlayMode(enabled: boolean): void {
   if (!win) return;
   const settings = store.get();
   if (enabled) {
     normalBounds = win.getBounds();
+    overlayLockedSize = overlayBounds
+      ? { width: overlayBounds.width, height: overlayBounds.height }
+      : { width: normalBounds.width, height: normalBounds.height };
     win.setOpacity(settings.opacity);
     win.setAlwaysOnTop(true, "screen-saver");
     win.setIgnoreMouseEvents(!settings.hoverMode, { forward: true });
+    win.setResizable(false);
+    win.removeListener('will-resize', preventOverlayResize);
+    win.removeListener('resize', guardOverlayResize);
+    win.on('will-resize', preventOverlayResize);
+    win.on('resize', guardOverlayResize);
     win.webContents.executeJavaScript(
       `document.body.classList.add('overlay');` +
       (settings.hoverMode ? `document.body.classList.add('hover-mode');` : `document.body.classList.remove('hover-mode');`)
     );
     if (overlayBounds) win.setBounds(overlayBounds);
   } else {
+    overlayLockedSize = null;
+    win.removeListener('will-resize', preventOverlayResize);
+    win.removeListener('resize', guardOverlayResize);
     overlayBounds = win.getBounds();
     win.setOpacity(1.0);
     win.setAlwaysOnTop(false);
     win.setIgnoreMouseEvents(false);
+    win.setResizable(true);
     win.webContents.executeJavaScript(`document.body.classList.remove('overlay','hover-mode');`);
     if (normalBounds) win.setBounds(normalBounds);
   }
@@ -163,7 +193,24 @@ function registerIpcHandlers(): void {
   });
 
   ipcMain.on("win:move", (_, x: number, y: number) => {
-    win?.setPosition(Math.round(x), Math.round(y));
+    if (!win) return;
+    // Absolute positioning: the renderer computes the target top-left from the
+    // cursor's screen position minus the grab offset, so it self-corrects every
+    // frame and never accumulates. We must NOT read position back from
+    // getBounds() (DWM rounding on transparent/frameless Windows drifts it).
+    // Pin the size to the intended overlay size so a move can never resize.
+    const { width, height } = win.getBounds();
+    const w = overlayLockedSize?.width ?? width;
+    const h = overlayLockedSize?.height ?? height;
+    win.setBounds({ x: Math.round(x), y: Math.round(y), width: w, height: h });
+  });
+
+  ipcMain.on("win:move-by", (_, dx: number, dy: number) => {
+    if (!win) return;
+    const { x, y, width, height } = win.getBounds();
+    const w = overlayLockedSize?.width ?? width;
+    const h = overlayLockedSize?.height ?? height;
+    win.setBounds({ x: x + Math.round(dx), y: y + Math.round(dy), width: w, height: h });
   });
 
   ipcMain.on("win:resize", (_, dir: string, dx: number, dy: number) => {
@@ -175,6 +222,7 @@ function registerIpcHandlers(): void {
     if (dir.includes("s")) nh = Math.max(200, wh + dy);
     if (dir.includes("w")) { nx = wx + dx; nw = Math.max(400, ww - dx); }
     if (dir.includes("n")) { ny = wy + dy; nh = Math.max(200, wh - dy); }
+    if (overlayLockedSize) overlayLockedSize = { width: nw, height: nh };
     win.setBounds({ x: nx, y: ny, width: nw, height: nh });
   });
 

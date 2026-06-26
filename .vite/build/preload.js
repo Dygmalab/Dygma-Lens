@@ -57,5 +57,8 @@ electron.contextBridge.exposeInMainWorld("lens", {
   },
   winMove(x, y) {
     electron.ipcRenderer.send("win:move", x, y);
+  },
+  winMoveBy(dx, dy) {
+    electron.ipcRenderer.send("win:move-by", dx, dy);
   }
 });

@@ -123,15 +123,14 @@ export function App() {
     if (!settings?.hoverMode || e.button !== 0) return;
     e.preventDefault();
     isDragging.current = true;
-    const startCursorX = e.screenX;
-    const startCursorY = e.screenY;
-    const startWinX = window.screenX;
-    const startWinY = window.screenY;
+    // Capture the cursor's offset inside the window once. Each move sets the
+    // window's top-left to (cursorScreen - grabOffset) absolutely, so the grab
+    // point stays under the cursor and errors never accumulate (delta tracking
+    // drifted because main read the position back from getBounds each frame).
+    const grabX = e.screenX - window.screenX;
+    const grabY = e.screenY - window.screenY;
     const onMove = (ev: MouseEvent) => {
-      window.lens?.winMove(
-        startWinX + (ev.screenX - startCursorX),
-        startWinY + (ev.screenY - startCursorY),
-      );
+      window.lens?.winMove(ev.screenX - grabX, ev.screenY - grabY);
     };
     const onUp = () => {
       isDragging.current = false;

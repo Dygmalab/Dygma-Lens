@@ -61,4 +61,5 @@ contextBridge.exposeInMainWorld("lens", {
   winClose(): void { ipcRenderer.send("win:close"); },
   winResize(dir: string, dx: number, dy: number): void { ipcRenderer.send("win:resize", dir, dx, dy); },
   winMove(x: number, y: number): void { ipcRenderer.send("win:move", x, y); },
+  winMoveBy(dx: number, dy: number): void { ipcRenderer.send("win:move-by", dx, dy); },
 });

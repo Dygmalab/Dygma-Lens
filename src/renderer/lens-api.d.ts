@@ -20,6 +20,7 @@ declare global {
       winClose(): void;
       winResize(dir: string, dx: number, dy: number): void;
       winMove(x: number, y: number): void;
+      winMoveBy(dx: number, dy: number): void;
     };
   }
 }

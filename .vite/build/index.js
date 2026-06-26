@@ -394,6 +394,8 @@ let overlayVisible = false;
 let overlayActive = false;
 let normalBounds = null;
 let overlayBounds = null;
+let overlayLockedSize = null;
+let fixingOverlayResize = false;
 let currentModel = null;
 let activeLayer = 0;
 const store = new SettingsStore();
@@ -425,6 +427,7 @@ function createWindow() {
     pushState();
     pushSettings();
   });
+  w.webContents.setVisualZoomLevelLimits(1, 1);
   return w;
 }
 function pushModel(model) {
@@ -444,23 +447,47 @@ function pushState() {
   };
   win == null ? void 0 : win.webContents.send("lens:state", state);
 }
+function guardOverlayResize() {
+  if (!win || !overlayLockedSize || fixingOverlayResize) return;
+  const { width, height } = win.getBounds();
+  if (width !== overlayLockedSize.width || height !== overlayLockedSize.height) {
+    fixingOverlayResize = true;
+    win.setSize(overlayLockedSize.width, overlayLockedSize.height);
+    setImmediate(() => {
+      fixingOverlayResize = false;
+    });
+  }
+}
+function preventOverlayResize(e) {
+  e.preventDefault();
+}
 function applyOverlayMode(enabled) {
   if (!win) return;
   const settings = store.get();
   if (enabled) {
     normalBounds = win.getBounds();
+    overlayLockedSize = overlayBounds ? { width: overlayBounds.width, height: overlayBounds.height } : { width: normalBounds.width, height: normalBounds.height };
     win.setOpacity(settings.opacity);
     win.setAlwaysOnTop(true, "screen-saver");
     win.setIgnoreMouseEvents(!settings.hoverMode, { forward: true });
+    win.setResizable(false);
+    win.removeListener("will-resize", preventOverlayResize);
+    win.removeListener("resize", guardOverlayResize);
+    win.on("will-resize", preventOverlayResize);
+    win.on("resize", guardOverlayResize);
     win.webContents.executeJavaScript(
       `document.body.classList.add('overlay');` + (settings.hoverMode ? `document.body.classList.add('hover-mode');` : `document.body.classList.remove('hover-mode');`)
     );
     if (overlayBounds) win.setBounds(overlayBounds);
   } else {
+    overlayLockedSize = null;
+    win.removeListener("will-resize", preventOverlayResize);
+    win.removeListener("resize", guardOverlayResize);
     overlayBounds = win.getBounds();
     win.setOpacity(1);
     win.setAlwaysOnTop(false);
     win.setIgnoreMouseEvents(false);
+    win.setResizable(true);
     win.webContents.executeJavaScript(`document.body.classList.remove('overlay','hover-mode');`);
     if (normalBounds) win.setBounds(normalBounds);
   }
@@ -507,7 +534,18 @@ function registerIpcHandlers() {
     return s;
   });
   electron.ipcMain.on("win:move", (_, x, y) => {
-    win == null ? void 0 : win.setPosition(Math.round(x), Math.round(y));
+    if (!win) return;
+    const { width, height } = win.getBounds();
+    const w = (overlayLockedSize == null ? void 0 : overlayLockedSize.width) ?? width;
+    const h = (overlayLockedSize == null ? void 0 : overlayLockedSize.height) ?? height;
+    win.setBounds({ x: Math.round(x), y: Math.round(y), width: w, height: h });
+  });
+  electron.ipcMain.on("win:move-by", (_, dx, dy) => {
+    if (!win) return;
+    const { x, y, width, height } = win.getBounds();
+    const w = (overlayLockedSize == null ? void 0 : overlayLockedSize.width) ?? width;
+    const h = (overlayLockedSize == null ? void 0 : overlayLockedSize.height) ?? height;
+    win.setBounds({ x: x + Math.round(dx), y: y + Math.round(dy), width: w, height: h });
   });
   electron.ipcMain.on("win:resize", (_, dir, dx, dy) => {
     if (!win) return;
@@ -524,6 +562,7 @@ function registerIpcHandlers() {
       ny = wy + dy;
       nh = Math.max(200, wh - dy);
     }
+    if (overlayLockedSize) overlayLockedSize = { width: nw, height: nh };
     win.setBounds({ x: nx, y: ny, width: nw, height: nh });
   });
   electron.ipcMain.handle("lens:set-show-underglow", (_, v) => store.set({ showUnderglow: v }));
