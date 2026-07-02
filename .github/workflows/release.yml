@@ -153,5 +153,7 @@ jobs:
 
       - name: Run semantic-release
         env:
-          GITHUB_TOKEN: ${{ secrets.GH_ACCESS_TOKEN }}
+          # The job already has contents:write, so the ephemeral Actions token is enough to
+          # push the tag and create the release in this same repo — no custom PAT needed.
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: npx semantic-release
