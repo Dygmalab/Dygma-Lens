@@ -23,7 +23,8 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: macos-latest
+          # TODO: macOS build is currently broken — re-add once fixed so releases cover all platforms.
+          # - os: macos-latest
           - os: windows-2022
           - os: ubuntu-22.04
 
