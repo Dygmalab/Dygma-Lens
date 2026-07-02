@@ -42,7 +42,9 @@ const config: ForgeConfig = {
     new MakerSquirrel({
       name: "dygma-lens",
     }),
-    new MakerZIP({}, ["darwin"]),
+    // Portable zips (in addition to the Squirrel/DMG installers) so Bazecor's CI can
+    // download a self-contained build of Lens and bundle it as an extra resource.
+    new MakerZIP({}, ["darwin", "win32"]),
     {
       name: "@electron-forge/maker-dmg",
       config: {},

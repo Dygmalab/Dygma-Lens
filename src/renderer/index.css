@@ -335,14 +335,13 @@ body.overlay.hover-mode .board:active {
   cursor: grabbing;
 }
 
-/* Keys: slightly dimmed by default, fade in on hover */
+/* Keys: maintain full opacity, add highlight on hover */
 body.overlay.hover-mode .keyboard-view {
-  opacity: 0.55;
+  opacity: 1;
   filter: none;
-  transition: opacity 0.3s ease, filter 0.3s ease;
+  transition: filter 0.3s ease;
 }
 body.overlay.hover-mode .app.hovered .keyboard-view {
-  opacity: 1;
   filter: drop-shadow(0 0 10px rgba(35, 136, 255, 0.4));
 }
 

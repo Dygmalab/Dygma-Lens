@@ -3,7 +3,7 @@ import path from "path";
 import os from "os";
 import type { LensSettings } from "../shared/types";
 
-const STORE_PATH = path.join(os.homedir(), ".lens", "settings.json");
+export const STORE_PATH = path.join(os.homedir(), ".lens", "settings.json");
 
 const DEFAULTS: LensSettings = {
   opacity: 0.85,
@@ -58,6 +58,11 @@ export class SettingsStore {
 
   get(): LensSettings {
     return { ...this.data };
+  }
+
+  reload(): LensSettings {
+    this.data = this.load();
+    return this.get();
   }
 
   set(updates: Partial<LensSettings>): LensSettings {

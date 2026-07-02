@@ -10,8 +10,10 @@ export const LENS_CONFIG_PATH_SEGMENTS = [".lens", "lens-config.json"];
 export const OVERLAY_MAGIC_BYTE = 0xaa;
 export const OVERLAY_PACKET_SIZE = 5;
 
-export const PACKET_TYPE_OVERLAY = 0x01;
+export const PACKET_TYPE_OVERLAY = 0x01;      // OVERLAY_KEY (superkey)
 export const PACKET_TYPE_LAYER = 0x02;
+export const PACKET_TYPE_OVERLAY_TAP = 0x03;  // OVERLAY_TAP key
+export const PACKET_TYPE_OVERLAY_HOLD = 0x04; // OVERLAY_HOLD key
 
 export const OVERLAY_EVENT_RELEASE = 0x00;
 export const OVERLAY_EVENT_TAP = 0x01;

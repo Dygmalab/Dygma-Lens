@@ -6,11 +6,23 @@ import {
   OVERLAY_PACKET_SIZE,
   PACKET_TYPE_OVERLAY,
   PACKET_TYPE_LAYER,
+  PACKET_TYPE_OVERLAY_TAP,
+  PACKET_TYPE_OVERLAY_HOLD,
   SONSEI_RAW_HID_REPORT_ID,
 } from "../shared/constants";
 
 export interface OverlayEvent {
   type: "overlay";
+  eventType: number;
+}
+
+export interface OverlayTapEvent {
+  type: "overlay-tap";
+  eventType: number;
+}
+
+export interface OverlayHoldEvent {
+  type: "overlay-hold";
   eventType: number;
 }
 
@@ -21,6 +33,8 @@ export interface LayerEvent {
 
 type RawHidEvents = {
   overlay: [event: OverlayEvent];
+  "overlay-tap": [event: OverlayTapEvent];
+  "overlay-hold": [event: OverlayHoldEvent];
   "layer-change": [event: LayerEvent];
   connected: [];
   disconnected: [];
@@ -40,7 +54,22 @@ export class RawHidListener extends EventEmitter<RawHidEvents> {
   private device: import("node-hid").HID | null = null;
   private running = false;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
-  private lastOverlayEventTime: Record<number, number> = {};
+  private lastEventTime: Record<string, number> = {};
+
+  // Debounces per (source, eventType) pair so bouncy/duplicate packets from a
+  // single physical press can't fire the same handler twice in quick succession.
+  private shouldEmit(source: string, eventType: number): boolean {
+    const key = `${source}:${eventType}`;
+    const now = Date.now();
+    const debounce = DEBOUNCE_MS[eventType] ?? DEFAULT_DEBOUNCE_MS;
+    const last = this.lastEventTime[key] ?? 0;
+    if (now - last < debounce) {
+      console.log(`[HID] ${source} eventType=0x${eventType.toString(16)} debounced (${now - last}ms < ${debounce}ms)`);
+      return false;
+    }
+    this.lastEventTime[key] = now;
+    return true;
+  }
 
   async start(): Promise<void> {
     try {
@@ -108,15 +137,19 @@ export class RawHidListener extends EventEmitter<RawHidEvents> {
 
     if (packetType === PACKET_TYPE_OVERLAY) {
       const eventType = buf[base + 2];
-      const now = Date.now();
-      const debounce = DEBOUNCE_MS[eventType] ?? DEFAULT_DEBOUNCE_MS;
-      const last = this.lastOverlayEventTime[eventType] ?? 0;
-      if (now - last < debounce) {
-        console.log(`[HID] overlay eventType=0x${eventType.toString(16)} debounced (${now - last}ms < ${debounce}ms)`);
-        return;
-      }
-      this.lastOverlayEventTime[eventType] = now;
+      if (!this.shouldEmit("overlay", eventType)) return;
+      console.log(`[HID] emitting overlay (OVERLAY_KEY superkey): eventType=0x${eventType.toString(16)}`);
       this.emit("overlay", { type: "overlay", eventType });
+    } else if (packetType === PACKET_TYPE_OVERLAY_TAP) {
+      const eventType = buf[base + 2];
+      if (!this.shouldEmit("overlay-tap", eventType)) return;
+      console.log(`[HID] emitting overlay-tap (OVERLAY_TAP key): eventType=0x${eventType.toString(16)}`);
+      this.emit("overlay-tap", { type: "overlay-tap", eventType });
+    } else if (packetType === PACKET_TYPE_OVERLAY_HOLD) {
+      const eventType = buf[base + 2];
+      if (!this.shouldEmit("overlay-hold", eventType)) return;
+      console.log(`[HID] emitting overlay-hold (OVERLAY_HOLD key): eventType=0x${eventType.toString(16)}`);
+      this.emit("overlay-hold", { type: "overlay-hold", eventType });
     } else if (packetType === PACKET_TYPE_LAYER) {
       console.log(`[HID] emitting layer-change: layer=${buf[base + 2]}`);
       this.emit("layer-change", { type: "layer", layer: buf[base + 2] });
